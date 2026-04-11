@@ -191,6 +191,18 @@ async def on_document(message: Message) -> None:
     await _process_and_reply(message, data, f"document:{mime}")
 
 
+@dp.message(~F.photo, ~F.document)
+async def fallback_need_image(message: Message) -> None:
+    """Ответ, если прислали не картинку — иначе кажется, что бот «спит»."""
+    if message.text and message.text.startswith("/"):
+        await message.answer("Неизвестная команда. Используйте /start или пришлите <b>фото</b> скрина.")
+        return
+    await message.answer(
+        "📷 Пришлите скрин <b>как фотографию</b> (галерея → Фото), "
+        "или <b>файлом</b> PNG / JPEG / WebP. Ссылка или текст без картинки не обрабатываются."
+    )
+
+
 async def main() -> None:
     global bot
     if not BOT_TOKEN:
@@ -206,6 +218,10 @@ async def main() -> None:
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    me = await bot.get_me()
+    logger.info("Starting bot @%s (id=%s) — long polling", me.username, me.id)
+    # Иначе при включённом webhook getUpdates пустой — бот «молчит»
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 

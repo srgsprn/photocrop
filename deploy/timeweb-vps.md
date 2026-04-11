@@ -117,7 +117,18 @@ journalctl -u mouse-photo-crop-bot -f
 
 Значит на этом сервере **ещё не ставили** бота (нет файла в `/etc/systemd/system/`).
 
-### Вариант A — уже вошли по SSH на **нужный** VPS как `root`
+### Вариант A1 — один скрипт на сервере (рекомендуется)
+
+На VPS под `root`:
+
+```bash
+export BOT_TOKEN='вставьте_токен_от_BotFather'
+curl -fsSL https://raw.githubusercontent.com/srgsprn/photocrop/main/deploy/install-vps-root.sh | env BOT_TOKEN="$BOT_TOKEN" bash
+```
+
+`env` нужен, чтобы токен дошёл до `bash` из pipe.
+
+### Вариант A2 — вручную (как раньше)
 
 Выполните подряд (токен подставьте свой в `nano`):
 
