@@ -23,6 +23,20 @@ git push -u origin main
 
 Не коммитьте `.env` и токен — в `.gitignore` уже есть `.env`.
 
+## Быстрый вариант с Mac (одна команда)
+
+Если у вас уже открывается `ssh root@IP`, на **своём** компьютере:
+
+```bash
+cd /path/to/photocrop
+export BOT_TOKEN='вставьте_токен_от_BotFather'
+bash deploy/vps-apply-env-and-restart.sh root@YOUR_SERVER_IP
+```
+
+Скрипт создаёт пользователя `photocrop`, клонирует/обновляет репо, пишет `.env`, ставит `systemd` и перезапускает бота.
+
+---
+
 ## 2. На сервере (под root по SSH)
 
 ```bash
