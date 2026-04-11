@@ -111,6 +111,53 @@ systemctl status mouse-photo-crop-bot
 journalctl -u mouse-photo-crop-bot -f
 ```
 
+---
+
+## Ошибка: `Unit mouse-photo-crop-bot.service could not be found`
+
+Значит на этом сервере **ещё не ставили** бота (нет файла в `/etc/systemd/system/`).
+
+### Вариант A — уже вошли по SSH на **нужный** VPS как `root`
+
+Выполните подряд (токен подставьте свой в `nano`):
+
+```bash
+apt-get update && apt-get install -y python3-venv python3-pip git
+
+id photocrop &>/dev/null || useradd -r -m -s /bin/bash -d /opt/mouse-photo-crop-bot photocrop
+mkdir -p /opt/mouse-photo-crop-bot
+chown -R photocrop:photocrop /opt/mouse-photo-crop-bot
+
+sudo -u photocrop -H bash -c 'test -f /opt/mouse-photo-crop-bot/bot.py || git clone https://github.com/srgsprn/photocrop.git /opt/mouse-photo-crop-bot'
+sudo -u photocrop -H bash -c 'cd /opt/mouse-photo-crop-bot && git pull'
+
+sudo -u photocrop -H bash -c 'cd /opt/mouse-photo-crop-bot && python3 -m venv .venv && .venv/bin/pip install -U pip && .venv/bin/pip install -r requirements.txt'
+
+install -m 600 -o photocrop -g photocrop /dev/null /opt/mouse-photo-crop-bot/.env
+nano /opt/mouse-photo-crop-bot/.env
+# одна строка: BOT_TOKEN=цифры:секрет
+
+cp /opt/mouse-photo-crop-bot/deploy/mouse-photo-crop-bot.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now mouse-photo-crop-bot
+systemctl status mouse-photo-crop-bot --no-pager
+journalctl -u mouse-photo-crop-bot -n 40 --no-pager
+```
+
+### Вариант B — скрипт с вашего Mac
+
+Раньше скрипт требовал SSH-ключ (`BatchMode`); теперь можно **ввести пароль**. На Mac:
+
+```bash
+cd /path/to/photocrop && git pull
+export BOT_TOKEN='ваш_токен'
+bash deploy/vps-apply-env-and-restart.sh root@85.239.51.175
+```
+
+### Важно: с какого хоста вы подключаетесь
+
+Команда `ssh root@85.239.51.175` должна открывать **Timeweb VPS с ботом**. Если вы сначала зашли на другой сервер (`root@6890201-ng864376`), это нормально — второй `ssh` всё равно должен попасть на `85.239.51.175`. Проверка: на целевом сервере `hostname -I` должен содержать этот IPv4.
+
 ## 3. Обновление кода
 
 ```bash

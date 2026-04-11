@@ -14,7 +14,8 @@ fi
 
 B64=$(printf '%s' "$BOT_TOKEN" | base64 | tr -d '\n')
 
-ssh -o BatchMode=yes "$TARGET" "export BASE=\"$B64\"; bash -s" <<'REMOTE'
+# Без BatchMode: можно вводить пароль SSH (если нет ключа).
+ssh "$TARGET" "export BASE=\"$B64\"; bash -s" <<'REMOTE'
 set -euo pipefail
 BOT_TOKEN=$(printf '%s' "$BASE" | base64 -d)
 INSTALL="/opt/mouse-photo-crop-bot"
