@@ -1,63 +1,77 @@
-# Product crop Telegram bot
+# Product crop Telegram bot (@mouse_photo_crop_bot)
 
-Bot for Telegram that **automatically crops screenshots** to the main subject (bag, clothes, accessory). You send one or several photos — it detects the product, cuts off the rest (browser, UI, etc.) and sends back the cropped images.
+Бот в Telegram **автоматически обрезает скриншоты** страниц: убирает пустые поля и по возможности выделяет основную карточку/фото. Можно слать **фото** или **файл** (PNG, JPEG, WebP).
 
-No commands needed: just send the pictures (single or as an album).
+## Как устроено
 
-## How it works
+1. **OpenCV** — несколько эвристик на одном кадре:
+   - обрезка по «энергии» градиента (Sobel) по строкам/столбцам — убирает большие однотонные поля;
+   - **Canny** + морфология + **контуры** — ищет крупные области с краями;
+   - **adaptive threshold** + **connected components** — запасной путь для контрастных макетов.
+   Кандидаты объединяются, если пересекаются; итоговый прямоугольник проверяется на «не слишком агрессивный» кроп (минимальная доля площади и сторон).
 
-1. You send a screenshot (e.g. from a product page).
-2. The bot uses [rembg](https://github.com/danielgatis/rembg) to detect the main object (subject/background removal).
-3. It crops the image to the bounding box of that object and sends the result.
+2. **rembg (u2net)** — если уверенность CV ниже порога или CV не дал устойчивого результата, подключается сегментация по альфе (как раньше в проекте).
 
-## Setup
+3. **Fallback** — если ничего нельзя применить уверенно, бот по умолчанию **отправляет исходное изображение** (не падает и не отдаёт пустой ответ). Это можно отключить переменной окружения.
 
-### 1. Create a bot in Telegram
+Параметры (padding, пороги площади, Canny, лимиты агрессии кропа) задаются в **`config.py`** / через префикс **`CROP_*`** в окружении (см. комментарии в `config.py`).
 
-- Open [@BotFather](https://t.me/BotFather) in Telegram.
-- Send `/newbot`, follow the steps, copy the **token**.
-
-### 2. Install dependencies
+## Установка
 
 ```bash
-cd telegram-crop-bot
+cd photocrop   # путь к клону репозитория
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**Note:** First run will download the `u2net` model (~176 MB). Later runs use the cached model.
+Первый запуск с **rembg** скачает модель `u2net` (~176 МБ). Чтобы обрабатывать только OpenCV без модели:
 
-### 3. Run the bot
+```bash
+export CROP_USE_REMBG=0
+```
+
+## Запуск бота
 
 ```bash
 export BOT_TOKEN="your_bot_token_here"
 python bot.py
 ```
 
-Or use a `.env` file (install `python-dotenv` and load it in `bot.py` if you prefer).
+Опционально: файл `.env` с `BOT_TOKEN=...` (подхватывается через `python-dotenv`).
 
-### 4. Use it
+### Лимиты
 
-- Open your bot in Telegram.
-- Send `/start` for a short intro.
-- Send one or several **photos** (screenshots). Each will be cropped to the product and sent back.
+- **`BOT_RATE_LIMIT_PER_MINUTE`** — максимум обработок с одного пользователя за ~минуту (по умолчанию 25).
+- **`BOT_MAX_IMAGE_BYTES`** — максимальный размер файла (по умолчанию 20 МБ).
 
-## Tips for best results
+## Локальный прогон на папке с картинками
 
-- Product should be clearly visible and not too small in the screenshot.
-- One main object per image works best (e.g. one bag, one item of clothing).
-
-## Optional: lighter model
-
-To use a smaller/faster model, in `crop_engine.py` change:
-
-```python
-_session = new_session("u2netp")  # instead of "u2net"
+```bash
+python batch_crop.py ./my_screenshots ./out_cropped
 ```
 
-`u2net` is more accurate; `u2netp` is faster and uses less memory.
+Только OpenCV (быстрее, без rembg):
 
-## Deploy (бот 24/7 без ноутбука)
+```bash
+python batch_crop.py ./my_screenshots ./out_cropped --no-rembg
+```
 
-Если нужен бот, который работает всегда (даже когда компьютер выключен), разверни его на облаке. Подробно: **[DEPLOY.md](DEPLOY.md)** — там пошагово Railway и Render. Кратко: заливаешь репо на GitHub → подключаешь к Railway или Render → добавляешь переменную `BOT_TOKEN` → деплой.
+## Команды в Telegram
+
+- `/start`, `/help` — краткая справка.
+- Остальное — просто отправьте **фото** или **документ**-картинку.
+
+## Деплой 24/7
+
+- **Свой VPS (Timeweb и др.):** пошагово **[deploy/timeweb-vps.md](deploy/timeweb-vps.md)** — отдельный пользователь `photocrop`, каталог `/opt/mouse-photo-crop-bot`, `systemd`, без пересечения с другими проектами.
+- **Railway / Render / Fly.io:** см. **[DEPLOY.md](DEPLOY.md)**. Не забудьте `BOT_TOKEN` только в секретах/`.env`, не в git.
+
+## Советы по качеству
+
+- Чем крупнее объект в кадре, тем стабильнее результат.
+- Сильно «шумные» или тёмные скрины иногда дают только fallback (исходник).
+
+## Опционально: более лёгкая модель rembg
+
+В `crop_engine.py` в `new_session("u2net")` можно заменить на `"u2netp"` — быстрее и легче, точность ниже.

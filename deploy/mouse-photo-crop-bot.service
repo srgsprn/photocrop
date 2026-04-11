@@ -1,0 +1,20 @@
+[Unit]
+Description=Mouse photo crop Telegram bot (isolated)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=photocrop
+Group=photocrop
+WorkingDirectory=/opt/mouse-photo-crop-bot
+EnvironmentFile=-/opt/mouse-photo-crop-bot/.env
+ExecStart=/opt/mouse-photo-crop-bot/.venv/bin/python /opt/mouse-photo-crop-bot/bot.py
+Restart=always
+RestartSec=12
+# Изоляция: свой каталог, без доступа к чужим сервисам
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

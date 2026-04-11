@@ -1,0 +1,16 @@
+# Конфиг Fly.io для бота (воркер без HTTP)
+# Имя приложения можно сменить при fly launch
+app = "photocrop"
+
+[build]
+
+[env]
+
+# Один процесс — бот. BOT_TOKEN задаётся через fly secrets set BOT_TOKEN=...
+[processes]
+app = "python bot.py"
+
+[[vm]]
+memory = "1gb"
+cpu_kind = "shared"
+cpus = 1
