@@ -24,10 +24,29 @@ fi
 mkdir -p "$INSTALL"
 chown -R photocrop:photocrop "$INSTALL"
 
-if [[ ! -f "$INSTALL/bot.py" ]]; then
-  sudo -u photocrop -H git clone "$REPO" "$INSTALL"
+# Домашняя папка photocrop = $INSTALL → там уже есть .bashrc и т.д., обычный git clone в каталог невозможен.
+export INSTALL_PATH="$INSTALL"
+export REPO_URL="$REPO"
+sudo -u photocrop -E -H bash -c '
+set -euo pipefail
+cd "$INSTALL_PATH"
+if [[ -d .git ]]; then
+  git remote get-url origin &>/dev/null || git remote add origin "$REPO_URL"
+  git fetch origin
+  git checkout -B main origin/main
+  git pull --ff-only origin main || true
+elif [[ -f bot.py ]]; then
+  git init
+  git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
+  git fetch origin
+  git checkout -B main origin/main
+else
+  TMP="$(mktemp -d)"
+  git clone "$REPO_URL" "$TMP/repo"
+  cp -a "$TMP/repo"/. "$INSTALL_PATH/"
+  rm -rf "$TMP"
 fi
-sudo -u photocrop -H bash -c "cd \"$INSTALL\" && git pull --ff-only"
+'
 
 if [[ ! -x "$INSTALL/.venv/bin/python" ]]; then
   sudo -u photocrop -H bash -c "cd \"$INSTALL\" && python3 -m venv .venv && .venv/bin/pip install -q -U pip"

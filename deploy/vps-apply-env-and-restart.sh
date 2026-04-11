@@ -31,12 +31,30 @@ fi
 mkdir -p "$INSTALL"
 chown -R photocrop:photocrop "$INSTALL"
 
-if [[ ! -f "$INSTALL/bot.py" ]]; then
-  echo "Клонирую репозиторий..."
-  sudo -u photocrop -H git clone https://github.com/srgsprn/photocrop.git "$INSTALL"
+REPO="https://github.com/srgsprn/photocrop.git"
+export INSTALL_PATH="$INSTALL"
+export REPO_URL="$REPO"
+sudo -u photocrop -E -H bash -c '
+set -euo pipefail
+cd "$INSTALL_PATH"
+if [[ -d .git ]]; then
+  git remote get-url origin &>/dev/null || git remote add origin "$REPO_URL"
+  git fetch origin
+  git checkout -B main origin/main 2>/dev/null || true
+  git pull --ff-only origin main || git pull --ff-only || true
+elif [[ -f bot.py ]]; then
+  git init
+  git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
+  git fetch origin
+  git checkout -B main origin/main
+else
+  echo "Клонирую репозиторий в непустой $INSTALL_PATH …"
+  TMP="$(mktemp -d)"
+  git clone "$REPO_URL" "$TMP/repo"
+  cp -a "$TMP/repo"/. "$INSTALL_PATH/"
+  rm -rf "$TMP"
 fi
-
-sudo -u photocrop -H bash -c "cd \"$INSTALL\" && git pull"
+'
 if [[ ! -x "$INSTALL/.venv/bin/python" ]]; then
   sudo -u photocrop -H bash -c "cd \"$INSTALL\" && python3 -m venv .venv && .venv/bin/pip install -q -U pip"
 fi
