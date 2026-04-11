@@ -32,29 +32,16 @@ mkdir -p "$INSTALL"
 chown -R photocrop:photocrop "$INSTALL"
 
 REPO="https://github.com/srgsprn/photocrop.git"
-export INSTALL_PATH="$INSTALL"
-export REPO_URL="$REPO"
-sudo -u photocrop -E -H bash -c '
-set -euo pipefail
-cd "$INSTALL_PATH"
-if [[ -d .git ]]; then
-  git remote get-url origin &>/dev/null || git remote add origin "$REPO_URL"
-  git fetch origin
-  git checkout -B main origin/main 2>/dev/null || true
-  git pull --ff-only origin main || git pull --ff-only || true
-elif [[ -f bot.py ]]; then
-  git init
-  git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
-  git fetch origin
-  git checkout -B main origin/main
+if sudo -u photocrop -H test -d "$INSTALL/.git"; then
+  sudo -u photocrop -H bash -c "cd \"$INSTALL\" && git remote get-url origin &>/dev/null || git remote add origin \"$REPO\""
+  sudo -u photocrop -H bash -c "cd \"$INSTALL\" && git fetch origin && (git checkout -B main origin/main 2>/dev/null || true) && (git pull --ff-only origin main || git pull --ff-only || true)"
 else
-  echo "Клонирую репозиторий в непустой $INSTALL_PATH …"
-  TMP="$(mktemp -d)"
-  git clone "$REPO_URL" "$TMP/repo"
-  cp -a "$TMP/repo"/. "$INSTALL_PATH/"
-  rm -rf "$TMP"
+  tmp="$(mktemp -d /tmp/photocrop-install.XXXXXX)"
+  chown photocrop:photocrop "$tmp"
+  sudo -u photocrop -H git clone --depth 1 "$REPO" "$tmp/repo"
+  sudo -u photocrop -H cp -a "$tmp/repo"/. "$INSTALL/"
+  rm -rf "$tmp"
 fi
-'
 if [[ ! -x "$INSTALL/.venv/bin/python" ]]; then
   sudo -u photocrop -H bash -c "cd \"$INSTALL\" && python3 -m venv .venv && .venv/bin/pip install -q -U pip"
 fi

@@ -123,10 +123,11 @@ journalctl -u mouse-photo-crop-bot -f
 
 ```bash
 export BOT_TOKEN='вставьте_токен_от_BotFather'
-curl -fsSL https://raw.githubusercontent.com/srgsprn/photocrop/main/deploy/install-vps-root.sh | env BOT_TOKEN="$BOT_TOKEN" bash
+# ?v=… обходит кэш CDN, если тянулась старая версия скрипта
+curl -fsSL "https://raw.githubusercontent.com/srgsprn/photocrop/main/deploy/install-vps-root.sh?v=$(date +%s)" | env BOT_TOKEN="$BOT_TOKEN" bash
 ```
 
-`env` нужен, чтобы токен дошёл до `bash` из pipe.
+`env` нужен, чтобы токен дошёл до `bash` из pipe. В начале вывода должно быть: `install-vps-root.sh v3`.
 
 ### Вариант A2 — вручную (как раньше)
 

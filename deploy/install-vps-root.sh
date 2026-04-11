@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Запускать НА VPS под root (один раз).
+# Запускать НА VPS под root.
 #   export BOT_TOKEN='цифры:секрет'
-#   bash install-vps-root.sh
-# Или: curl -fsSL https://raw.githubusercontent.com/srgsprn/photocrop/main/deploy/install-vps-root.sh | bash -s
-#   (тогда перед этим: export BOT_TOKEN='...')
+#   curl -fsSL .../install-vps-root.sh | env BOT_TOKEN="$BOT_TOKEN" bash
 set -euo pipefail
+
+echo "install-vps-root.sh v3 — clone via /tmp only (never git clone into home dir)"
 
 if [[ -z "${BOT_TOKEN:-}" ]]; then
   echo "Укажите токен:  export BOT_TOKEN='123456:AA...'" >&2
@@ -24,29 +24,23 @@ fi
 mkdir -p "$INSTALL"
 chown -R photocrop:photocrop "$INSTALL"
 
-# Домашняя папка photocrop = $INSTALL → там уже есть .bashrc и т.д., обычный git clone в каталог невозможен.
-export INSTALL_PATH="$INSTALL"
-export REPO_URL="$REPO"
-sudo -u photocrop -E -H bash -c '
-set -euo pipefail
-cd "$INSTALL_PATH"
-if [[ -d .git ]]; then
-  git remote get-url origin &>/dev/null || git remote add origin "$REPO_URL"
-  git fetch origin
-  git checkout -B main origin/main
-  git pull --ff-only origin main || true
-elif [[ -f bot.py ]]; then
-  git init
-  git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
-  git fetch origin
-  git checkout -B main origin/main
-else
-  TMP="$(mktemp -d)"
-  git clone "$REPO_URL" "$TMP/repo"
-  cp -a "$TMP/repo"/. "$INSTALL_PATH/"
-  rm -rf "$TMP"
-fi
-'
+# Клон только во временный каталог (у photocrop дом = $INSTALL, там .bashrc — не пустой).
+sync_repo() {
+  local tmp
+  tmp="$(mktemp -d /tmp/photocrop-install.XXXXXX)"
+  chown photocrop:photocrop "$tmp"
+  if sudo -u photocrop -H test -d "$INSTALL/.git"; then
+    sudo -u photocrop -H bash -c "cd \"$INSTALL\" && git remote get-url origin &>/dev/null || git remote add origin \"$REPO\""
+    sudo -u photocrop -H bash -c "cd \"$INSTALL\" && git fetch origin && (git checkout -B main origin/main 2>/dev/null || true) && (git pull --ff-only origin main || git pull --ff-only || true)"
+    rmdir "$tmp" 2>/dev/null || rm -rf "$tmp"
+    return 0
+  fi
+  sudo -u photocrop -H git clone --depth 1 "$REPO" "$tmp/repo"
+  sudo -u photocrop -H cp -a "$tmp/repo"/. "$INSTALL/"
+  rm -rf "$tmp"
+}
+
+sync_repo
 
 if [[ ! -x "$INSTALL/.venv/bin/python" ]]; then
   sudo -u photocrop -H bash -c "cd \"$INSTALL\" && python3 -m venv .venv && .venv/bin/pip install -q -U pip"
