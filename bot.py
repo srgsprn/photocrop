@@ -75,7 +75,7 @@ def _caption_for(out: ProcessOutcome) -> str:
             "ℹ️ Не удалось уверенно выделить объект — отправляю исходник без обрезки. "
             "Попробуйте скрин крупнее или с более контрастным фоном."
         )
-    return f"✅ Готово <i>({out.method})</i>"
+    return "Фотка обрезана, маусок 🐭"
 
 
 async def _process_and_reply(message: Message, data: bytes, source: str) -> None:
