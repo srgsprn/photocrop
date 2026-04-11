@@ -13,7 +13,12 @@ import numpy as np
 from PIL import Image, ImageFile
 
 from config import CropConfig, DEFAULT_CROP_CONFIG
-from image_crop import apply_padding, auto_crop_cv_bgr, validate_crop_bbox
+from image_crop import (
+    apply_padding,
+    auto_crop_cv_bgr,
+    trim_matte_borders_rgb,
+    validate_crop_bbox,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +145,11 @@ def process_image_bytes(
         raise ValueError("Could not detect subject")
 
     cropped = rgb.crop(chosen)
+    if cfg.trim_matte_enabled:
+        t = trim_matte_borders_rgb(np.asarray(cropped), cfg)
+        if t.size > 0 and t.shape[0] >= 2 and t.shape[1] >= 2:
+            cropped = Image.fromarray(t)
+            method_parts.append("matte_trim")
     out_bytes = _save_png(cropped)
     label = "+".join(method_parts) if method_parts else "unknown"
     return ProcessOutcome(

@@ -381,3 +381,79 @@ def auto_crop_cv_bgr(
 def apply_padding(bbox: BBox, w: int, h: int, pad: int) -> BBox:
     x1, y1, x2, y2 = bbox
     return _clamp_bbox(x1 - pad, y1 - pad, x2 + pad, y2 + pad, w, h)
+
+
+def _trim_matte_single_pass(work: np.ndarray, cfg: CropConfig) -> np.ndarray:
+    """One top→bottom→left→right peel; recomputes masks after vertical crop."""
+    h, w = work.shape[:2]
+    if h < 4 or w < 4:
+        return work
+
+    gray = cv2.cvtColor(work, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    chrom = np.ptp(work.astype(np.int16), axis=2).astype(np.float32)
+    light = (gray >= cfg.trim_matte_gray_floor) & (chrom <= cfg.trim_matte_chroma_max)
+
+    def row_is_matte(y: int) -> bool:
+        return bool(
+            light[y].mean() >= cfg.trim_matte_edge_light_frac
+            and gray[y].mean() >= cfg.trim_matte_edge_mean_min
+        )
+
+    y0 = 0
+    while y0 < h - 1 and row_is_matte(y0):
+        y0 += 1
+    yy = h - 1
+    while yy > y0 and row_is_matte(yy):
+        yy -= 1
+    out = work[y0 : yy + 1, :, :]
+    if out.size == 0:
+        return work
+
+    h2, w2 = out.shape[:2]
+    gray = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    chrom = np.ptp(out.astype(np.int16), axis=2).astype(np.float32)
+    light = (gray >= cfg.trim_matte_gray_floor) & (chrom <= cfg.trim_matte_chroma_max)
+
+    def col_is_matte(x: int) -> bool:
+        return bool(
+            light[:, x].mean() >= cfg.trim_matte_edge_light_frac
+            and gray[:, x].mean() >= cfg.trim_matte_edge_mean_min
+        )
+
+    x0 = 0
+    while x0 < w2 - 1 and col_is_matte(x0):
+        x0 += 1
+    xx = w2 - 1
+    while xx > x0 and col_is_matte(xx):
+        xx -= 1
+    return out[:, x0 : xx + 1, :]
+
+
+def trim_matte_borders_rgb(rgb: np.ndarray, cfg: CropConfig) -> np.ndarray:
+    """
+    Strip uniform light-gray / white «паспарту» around the photo inside an already
+    cropped frame (marketplace hero image with side/top/bottom matting).
+    rgb: uint8 (H, W, 3) RGB.
+    """
+    if not cfg.trim_matte_enabled or rgb.size == 0 or rgb.ndim != 3 or rgb.shape[2] != 3:
+        return rgb
+
+    orig_h, orig_w = rgb.shape[:2]
+    if orig_h < 12 or orig_w < 12:
+        return rgb
+
+    min_w = max(cfg.trim_matte_min_side_px, int(orig_w * cfg.trim_matte_min_remain_frac))
+    min_h = max(cfg.trim_matte_min_side_px, int(orig_h * cfg.trim_matte_min_remain_frac))
+
+    current = rgb.copy()
+    for _ in range(cfg.trim_matte_max_passes):
+        nxt = _trim_matte_single_pass(current, cfg)
+        if nxt.shape == current.shape:
+            break
+        nh, nw = nxt.shape[:2]
+        if nh < min_h or nw < min_w:
+            logger.debug("Matte trim: stop before min remain %sx%s", nw, nh)
+            break
+        current = nxt
+
+    return current

@@ -39,8 +39,8 @@ def _bool(name: str, default: bool) -> bool:
 class CropConfig:
     """Image auto-crop parameters (no magic numbers in call sites)."""
 
-    # Border padding around detected box (pixels, before optional downscale back)
-    padding_px: int = _int("CROP_PADDING_PX", 14)
+    # Border padding around detected box (before inner matte trim)
+    padding_px: int = _int("CROP_PADDING_PX", 6)
 
     # Minimum contour / component area as fraction of image pixels
     min_area_ratio: float = _float("CROP_MIN_AREA_RATIO", 0.02)
@@ -92,6 +92,16 @@ class CropConfig:
 
     # If listing layout confidence ≥ this, prefer its bbox over merged CV boxes
     listing_prefer_confidence: float = _float("CROP_LISTING_PREFER_CONFIDENCE", 0.52)
+
+    # --- Matte / paspartout (white bars inside the hero frame, app UI) ---
+    trim_matte_enabled: bool = _bool("CROP_TRIM_MATTE", True)
+    trim_matte_gray_floor: int = _int("CROP_TRIM_MATTE_GRAY", 245)
+    trim_matte_chroma_max: int = _int("CROP_TRIM_MATTE_CHROMA", 28)
+    trim_matte_edge_light_frac: float = _float("CROP_TRIM_MATTE_LIGHT_FRAC", 0.86)
+    trim_matte_edge_mean_min: float = _float("CROP_TRIM_MATTE_MEAN_MIN", 242.0)
+    trim_matte_max_passes: int = _int("CROP_TRIM_MATTE_PASSES", 8)
+    trim_matte_min_side_px: int = _int("CROP_TRIM_MATTE_MIN_SIDE", 64)
+    trim_matte_min_remain_frac: float = _float("CROP_TRIM_MATTE_MIN_REMAIN", 0.62)
 
 
 @dataclass(frozen=True)
