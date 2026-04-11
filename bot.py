@@ -42,7 +42,8 @@ bot: Bot | None = None
 
 
 def _token_looks_valid(token: str) -> bool:
-    return bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{30,}", token))
+    # BotFather: <digits>:<alphanumeric + _ -> ~35 chars; allow a bit of range
+    return bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", token))
 
 # user_id -> deque of unix timestamps (last 60s)
 _rate: Dict[int, Deque[float]] = {}
