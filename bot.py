@@ -9,13 +9,13 @@ import re
 import time
 from collections import deque
 from io import BytesIO
-from typing import Deque, Dict
+from typing import Deque, Dict, List, Tuple
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, InputMediaPhoto, Message, ReplyParameters
 
 try:
     from dotenv import load_dotenv
@@ -55,6 +55,11 @@ ALLOWED_DOC_MIME = {
     "image/webp",
 }
 
+# Альбом: ждём все части media_group, затем один ответ
+ALBUM_DEBOUNCE_SEC = 1.25
+_album_buffers: Dict[Tuple[int, str], List[Message]] = {}
+_album_flush_tasks: Dict[Tuple[int, str], asyncio.Task] = {}
+
 
 def _rate_allow(user_id: int) -> bool:
     now = time.monotonic()
@@ -88,6 +93,139 @@ def _caption_document_file(out: ProcessOutcome) -> str:
     if out.used_fallback_original:
         return "📥 Исходник PNG — скачай и сохрани в «Фото», как удобнее."
     return "📥 Обрезанный PNG — скачай, открой → Поделиться → Сохранить изображение."
+
+
+def _caption_album_group(n: int) -> str:
+    """Одна подпись на весь альбом (только у первого фото в группе)."""
+    return (
+        f"Фотки обрезаны, маусок 🐭 <i>×{n}</i>\n\n"
+        "💾 Удерживай каждое фото → «Сохранить в фото» (iPhone) или ⋮ → Сохранить (Android)."
+    )
+
+
+async def _download_largest_photo(message: Message) -> bytes:
+    photo = message.photo[-1]
+    file = await message.bot.get_file(photo.file_id)
+    buf = BytesIO()
+    await message.bot.download_file(file.file_path, buf)
+    return buf.getvalue()
+
+
+async def _process_album_and_reply(messages: List[Message]) -> None:
+    """Обрезка всех фото альбома и ответ одной медиа-группой (до 10 за раз)."""
+    messages = sorted({m.message_id: m for m in messages}.values(), key=lambda m: m.message_id)
+    if not messages:
+        return
+    first = messages[0]
+    uid = first.from_user.id if first.from_user else 0
+
+    for _ in messages:
+        if not _rate_allow(uid):
+            await first.answer(
+                "⏳ Слишком много изображений за короткое время. Подождите минуту и попробуйте снова."
+            )
+            return
+
+    for m in messages:
+        if m.photo is None:
+            continue
+        ph = m.photo[-1]
+        if ph.file_size and ph.file_size > _bot_cfg.max_image_bytes:
+            await first.answer(
+                "❌ Одно из фото слишком большое. До "
+                f"{_bot_cfg.max_image_bytes // (1024 * 1024)} МБ на файл."
+            )
+            return
+
+    status = await first.answer(f"⏳ Обрезаю {len(messages)} фото…")
+    outcomes: List[ProcessOutcome] = []
+    try:
+        for m in messages:
+            try:
+                data = await _download_largest_photo(m)
+            except Exception:
+                logger.exception("Album: download failed")
+                await status.delete()
+                await first.answer("❌ Не удалось скачать одно из фото из Telegram.")
+                return
+            if len(data) > _bot_cfg.max_image_bytes:
+                await status.delete()
+                await first.answer("❌ Одно из фото слишком большое.")
+                return
+            try:
+                out = await asyncio.to_thread(process_image_bytes, data)
+            except ValueError as e:
+                await status.delete()
+                await first.answer(f"❌ {e}")
+                return
+            except Exception:
+                logger.exception("Album: crop failed")
+                await status.delete()
+                await first.answer("❌ Не получилось обработать одно из фото.")
+                return
+            outcomes.append(out)
+    finally:
+        try:
+            await status.delete()
+        except Exception:
+            pass
+
+    if not outcomes:
+        return
+
+    logger.info(
+        "Album OK user=%s count=%s methods=%s",
+        uid,
+        len(outcomes),
+        [o.method for o in outcomes],
+    )
+
+    bot = first.bot
+    chat_id = first.chat.id
+    reply_to = first.message_id
+
+    for i in range(0, len(outcomes), 10):
+        chunk = outcomes[i : i + 10]
+        media: List[InputMediaPhoto] = []
+        for j, out in enumerate(chunk):
+            global_idx = i + j
+            cap = _caption_album_group(len(outcomes)) if global_idx == 0 else None
+            bf = BufferedInputFile(
+                file=out.data,
+                filename=f"mouse_crop_{global_idx + 1}.png",
+            )
+            if cap:
+                media.append(
+                    InputMediaPhoto(
+                        media=bf,
+                        caption=cap,
+                        parse_mode=ParseMode.HTML,
+                    )
+                )
+            else:
+                media.append(InputMediaPhoto(media=bf))
+        await bot.send_media_group(
+            chat_id=chat_id,
+            media=media,
+            reply_parameters=ReplyParameters(message_id=reply_to),
+        )
+
+
+def _schedule_album_flush(key: Tuple[int, str]) -> None:
+    async def _flush() -> None:
+        try:
+            await asyncio.sleep(ALBUM_DEBOUNCE_SEC)
+        except asyncio.CancelledError:
+            return
+        msgs = _album_buffers.pop(key, [])
+        _album_flush_tasks.pop(key, None)
+        if msgs:
+            await _process_album_and_reply(msgs)
+
+    if key in _album_flush_tasks:
+        _album_flush_tasks[key].cancel()
+    task = asyncio.create_task(_flush())
+    _album_flush_tasks[key] = task
 
 
 async def _process_and_reply(message: Message, data: bytes, source: str) -> None:
@@ -149,7 +287,7 @@ async def cmd_start(message: Message) -> None:
         "Пришлите <b>скриншот</b> или фото страницы — я обрежу лишнее "
         "(поля, интерфейс браузера) и оставлю основную картинку/карточку.\n\n"
         "Можно отправить как <b>фото</b> или как <b>файл</b> (PNG, JPG, WebP).\n"
-        "Несколько фото в одном сообщении обрабатываются по одному."
+        "Несколько фото <b>одним альбомом</b> — отвечу тоже <b>альбомом</b> (до 10 за раз)."
     )
 
 
@@ -159,13 +297,27 @@ async def cmd_help(message: Message) -> None:
         "📷 <b>Как пользоваться</b>\n\n"
         "• Фото или картинка-документ с сайта.\n"
         "• Бот ищет основной визуальный блок и обрезает поля.\n"
-        "• Если уверенности мало — пришлю исходник без кропа.\n\n"
+        "• Если уверенности мало — пришлю исходник без кропа.\n"
+        "• Несколько фото альбомом — верну обрезанные одним альбомом.\n\n"
+        "<b>Канал:</b> бот <b>не может</b> сам класть посты в «отложенные» публикации "
+        "(так устроен Telegram Bot API). Можно позже добавить отправку в канал "
+        "сразу или планировщик на сервере.\n\n"
         "<b>Совет:</b> чтобы товар был крупнее в кадре — результат обычно лучше."
     )
 
 
-@dp.message(F.photo)
-async def on_photo(message: Message) -> None:
+@dp.message(F.photo, F.media_group_id)
+async def on_photo_album_piece(message: Message) -> None:
+    mg = message.media_group_id
+    if mg is None:
+        return
+    key = (message.chat.id, str(mg))
+    _album_buffers.setdefault(key, []).append(message)
+    _schedule_album_flush(key)
+
+
+@dp.message(F.photo, ~F.media_group_id)
+async def on_photo_single(message: Message) -> None:
     photo = message.photo[-1]
     try:
         file = await message.bot.get_file(photo.file_id)
