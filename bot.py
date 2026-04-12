@@ -69,13 +69,25 @@ def _rate_allow(user_id: int) -> bool:
     return True
 
 
-def _caption_for(out: ProcessOutcome) -> str:
+def _caption_photo_preview(out: ProcessOutcome) -> str:
+    """Текст к превью. Автосохранения в галерею у Telegram нет — только подсказка."""
     if out.used_fallback_original:
         return (
-            "ℹ️ Не удалось уверенно выделить объект — отправляю исходник без обрезки. "
-            "Попробуйте скрин крупнее или с более контрастным фоном."
+            "ℹ️ Не удалось уверенно выделить объект — отправляю исходник без обрезки.\n\n"
+            "💾 В галерею: удерживай фото → «Сохранить в фото» (iPhone) / ⋮ → Сохранить (Android)."
         )
-    return "Фотка обрезана, маусок 🐭"
+    return (
+        "Фотка обрезана, маусок 🐭\n\n"
+        "💾 <b>В галерею с превью:</b> удерживай картинку выше → «Сохранить в фото» "
+        "(iPhone) или меню ⋮ → Сохранить (Android).\n\n"
+        "⬇️ Ниже тот же кадр <b>файлом PNG</b> — без сжатия Telegram; скачай, открой и сохрани в изображения."
+    )
+
+
+def _caption_document_file(out: ProcessOutcome) -> str:
+    if out.used_fallback_original:
+        return "📥 Исходник PNG — скачай и сохрани в «Фото», как удобнее."
+    return "📥 Обрезанный PNG — скачай, открой → Поделиться → Сохранить изображение."
 
 
 async def _process_and_reply(message: Message, data: bytes, source: str) -> None:
@@ -121,8 +133,12 @@ async def _process_and_reply(message: Message, data: bytes, source: str) -> None
         len(outcome.data),
     )
     await message.answer_photo(
-        photo=BufferedInputFile(file=outcome.data, filename="cropped.png"),
-        caption=_caption_for(outcome),
+        photo=BufferedInputFile(file=outcome.data, filename="mouse_crop.png"),
+        caption=_caption_photo_preview(outcome),
+    )
+    await message.answer_document(
+        document=BufferedInputFile(file=outcome.data, filename="mouse_crop.png"),
+        caption=_caption_document_file(outcome),
     )
 
 
