@@ -74,19 +74,18 @@ def _rate_allow(user_id: int) -> bool:
     return True
 
 
+def _caption_done_short() -> str:
+    """Одна и та же подпись: одно фото или альбом."""
+    return "Фотки обрезаны, маусок 🐭"
+
+
 def _caption_photo_preview(out: ProcessOutcome) -> str:
-    """Текст к превью. Автосохранения в галерею у Telegram нет — только подсказка."""
     if out.used_fallback_original:
         return (
             "ℹ️ Не удалось уверенно выделить объект — отправляю исходник без обрезки.\n\n"
             "💾 В галерею: удерживай фото → «Сохранить в фото» (iPhone) / ⋮ → Сохранить (Android)."
         )
-    return (
-        "Фотка обрезана, маусок 🐭\n\n"
-        "💾 <b>В галерею с превью:</b> удерживай картинку выше → «Сохранить в фото» "
-        "(iPhone) или меню ⋮ → Сохранить (Android).\n\n"
-        "⬇️ Ниже тот же кадр <b>файлом PNG</b> — без сжатия Telegram; скачай, открой и сохрани в изображения."
-    )
+    return _caption_done_short()
 
 
 def _caption_document_file(out: ProcessOutcome) -> str:
@@ -95,12 +94,6 @@ def _caption_document_file(out: ProcessOutcome) -> str:
     return "📥 Обрезанный PNG — скачай, открой → Поделиться → Сохранить изображение."
 
 
-def _caption_album_group(n: int) -> str:
-    """Одна подпись на весь альбом (только у первого фото в группе)."""
-    return (
-        f"Фотки обрезаны, маусок 🐭 <i>×{n}</i>\n\n"
-        "💾 Удерживай каждое фото → «Сохранить в фото» (iPhone) или ⋮ → Сохранить (Android)."
-    )
 
 
 async def _download_largest_photo(message: Message) -> bytes:
@@ -189,19 +182,13 @@ async def _process_album_and_reply(messages: List[Message]) -> None:
         media: List[InputMediaPhoto] = []
         for j, out in enumerate(chunk):
             global_idx = i + j
-            cap = _caption_album_group(len(outcomes)) if global_idx == 0 else None
+            cap = _caption_done_short() if j == 0 else None
             bf = BufferedInputFile(
                 file=out.data,
                 filename=f"mouse_crop_{global_idx + 1}.png",
             )
             if cap:
-                media.append(
-                    InputMediaPhoto(
-                        media=bf,
-                        caption=cap,
-                        parse_mode=ParseMode.HTML,
-                    )
-                )
+                media.append(InputMediaPhoto(media=bf, caption=cap))
             else:
                 media.append(InputMediaPhoto(media=bf))
         await bot.send_media_group(
