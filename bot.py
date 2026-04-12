@@ -74,28 +74,6 @@ def _rate_allow(user_id: int) -> bool:
     return True
 
 
-def _caption_done_short() -> str:
-    """Одна и та же подпись: одно фото или альбом."""
-    return "Фотки обрезаны, маусок 🐭"
-
-
-def _caption_photo_preview(out: ProcessOutcome) -> str:
-    if out.used_fallback_original:
-        return (
-            "ℹ️ Не удалось уверенно выделить объект — отправляю исходник без обрезки.\n\n"
-            "💾 В галерею: удерживай фото → «Сохранить в фото» (iPhone) / ⋮ → Сохранить (Android)."
-        )
-    return _caption_done_short()
-
-
-def _caption_document_file(out: ProcessOutcome) -> str:
-    if out.used_fallback_original:
-        return "📥 Исходник PNG — скачай и сохрани в «Фото», как удобнее."
-    return "📥 Обрезанный PNG — скачай, открой → Поделиться → Сохранить изображение."
-
-
-
-
 async def _download_largest_photo(message: Message) -> bytes:
     photo = message.photo[-1]
     file = await message.bot.get_file(photo.file_id)
@@ -182,15 +160,11 @@ async def _process_album_and_reply(messages: List[Message]) -> None:
         media: List[InputMediaPhoto] = []
         for j, out in enumerate(chunk):
             global_idx = i + j
-            cap = _caption_done_short() if j == 0 else None
             bf = BufferedInputFile(
                 file=out.data,
                 filename=f"mouse_crop_{global_idx + 1}.png",
             )
-            if cap:
-                media.append(InputMediaPhoto(media=bf, caption=cap))
-            else:
-                media.append(InputMediaPhoto(media=bf))
+            media.append(InputMediaPhoto(media=bf))
         await bot.send_media_group(
             chat_id=chat_id,
             media=media,
@@ -259,11 +233,6 @@ async def _process_and_reply(message: Message, data: bytes, source: str) -> None
     )
     await message.answer_photo(
         photo=BufferedInputFile(file=outcome.data, filename="mouse_crop.png"),
-        caption=_caption_photo_preview(outcome),
-    )
-    await message.answer_document(
-        document=BufferedInputFile(file=outcome.data, filename="mouse_crop.png"),
-        caption=_caption_document_file(outcome),
     )
 
 
