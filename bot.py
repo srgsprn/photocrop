@@ -14,6 +14,7 @@ from typing import Deque, Dict, List, Tuple
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, InputMediaPhoto, Message, ReplyParameters
 
@@ -60,6 +61,8 @@ ALLOWED_DOC_MIME = {
 ALBUM_DEBOUNCE_SEC = 1.25
 _album_buffers: Dict[Tuple[int, str], List[Message]] = {}
 _album_flush_tasks: Dict[Tuple[int, str], asyncio.Task] = {}
+STARTUP_RETRY_DELAY_SEC = 8
+STARTUP_MAX_DELAY_SEC = 60
 
 
 def _rate_allow(user_id: int) -> bool:
@@ -271,6 +274,39 @@ async def _process_and_reply(message: Message, data: bytes, source: str) -> None
     )
 
 
+async def _wait_for_telegram_api(bot: Bot) -> None:
+    """
+    Не валим процесс при временной недоступности Telegram API.
+    Ждём сеть и только потом начинаем polling.
+    """
+    delay = STARTUP_RETRY_DELAY_SEC
+    while True:
+        try:
+            me = await bot.get_me(request_timeout=60)
+            logger.info(
+                "Telegram API OK for @%s (id=%s), workers=%s timeout=%ss",
+                me.username,
+                me.id,
+                _bot_cfg.max_parallel_jobs,
+                _bot_cfg.process_timeout_sec,
+            )
+            return
+        except TelegramNetworkError:
+            logger.exception(
+                "Telegram API timeout on startup; retry in %ss",
+                delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(STARTUP_MAX_DELAY_SEC, delay + 5)
+        except Exception:
+            logger.exception(
+                "Unexpected startup error while contacting Telegram; retry in %ss",
+                delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(STARTUP_MAX_DELAY_SEC, delay + 5)
+
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     await message.answer(
@@ -377,17 +413,27 @@ async def main() -> None:
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    me = await bot.get_me()
-    logger.info(
-        "Starting bot @%s (id=%s) — long polling, workers=%s timeout=%ss",
-        me.username,
-        me.id,
-        _bot_cfg.max_parallel_jobs,
-        _bot_cfg.process_timeout_sec,
-    )
-    # Иначе при включённом webhook getUpdates пустой — бот «молчит»
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    await _wait_for_telegram_api(bot)
+
+    # Иначе при включённом webhook getUpdates пустой — бот «молчит».
+    # Из-за сетевых лагов это тоже делаем с ретраями.
+    while True:
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot)
+            return
+        except TelegramNetworkError:
+            logger.exception(
+                "Polling/network error; keep process alive and retry in %ss",
+                STARTUP_RETRY_DELAY_SEC,
+            )
+            await asyncio.sleep(STARTUP_RETRY_DELAY_SEC)
+        except Exception:
+            logger.exception(
+                "Unhandled polling crash; retry in %ss",
+                STARTUP_RETRY_DELAY_SEC,
+            )
+            await asyncio.sleep(STARTUP_RETRY_DELAY_SEC)
 
 
 if __name__ == "__main__":
