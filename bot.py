@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
 import time
 from collections import deque
 from io import BytesIO
@@ -13,6 +14,7 @@ from typing import Deque, Dict, List, Tuple
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.filters import Command
@@ -46,6 +48,21 @@ def _token_looks_valid(token: str) -> bool:
     # BotFather: <digits>:<alphanumeric + _ -> ~35 chars; allow a bit of range
     return bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", token))
 
+
+def build_aiogram_session() -> AiohttpSession:
+    """
+    Сетевая устойчивость для VPS:
+    - опциональный proxy через BOT_PROXY_URL
+    - форс IPv4 через BOT_FORCE_IPV4=1 (по умолчанию включен)
+    """
+    kwargs = {"limit": 40, "timeout": 90}
+    if PROXY_URL:
+        kwargs["proxy"] = PROXY_URL
+    session = AiohttpSession(**kwargs)
+    if FORCE_IPV4:
+        session._connector_init["family"] = socket.AF_INET
+    return session
+
 # user_id -> deque of unix timestamps (last 60s)
 _rate: Dict[int, Deque[float]] = {}
 _bot_cfg = DEFAULT_BOT_CONFIG
@@ -63,6 +80,8 @@ _album_buffers: Dict[Tuple[int, str], List[Message]] = {}
 _album_flush_tasks: Dict[Tuple[int, str], asyncio.Task] = {}
 STARTUP_RETRY_DELAY_SEC = 8
 STARTUP_MAX_DELAY_SEC = 60
+FORCE_IPV4 = (os.environ.get("BOT_FORCE_IPV4", "1").strip().lower() in ("1", "true", "yes", "on"))
+PROXY_URL = (os.environ.get("BOT_PROXY_URL", "") or "").strip()
 
 
 def _rate_allow(user_id: int) -> bool:
@@ -292,7 +311,7 @@ async def _wait_for_telegram_api(bot: Bot) -> None:
             )
             return
         except TelegramNetworkError:
-            logger.exception(
+            logger.warning(
                 "Telegram API timeout on startup; retry in %ss",
                 delay,
             )
@@ -412,6 +431,7 @@ async def main() -> None:
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=build_aiogram_session(),
     )
     await _wait_for_telegram_api(bot)
 
@@ -423,7 +443,7 @@ async def main() -> None:
             await dp.start_polling(bot)
             return
         except TelegramNetworkError:
-            logger.exception(
+            logger.warning(
                 "Polling/network error; keep process alive and retry in %ss",
                 STARTUP_RETRY_DELAY_SEC,
             )
