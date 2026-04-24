@@ -25,25 +25,25 @@ logger = logging.getLogger(__name__)
 # Allow slightly truncated downloads
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-_session = None
+_session_by_model: dict[str, object] = {}
 
 
-def _get_session():
-    global _session
-    if _session is None:
+def _get_session(model_name: str):
+    if model_name not in _session_by_model:
         from rembg import new_session
 
-        _session = new_session("u2net")
-    return _session
+        _session_by_model[model_name] = new_session(model_name)
+    return _session_by_model[model_name]
 
 
 def get_subject_bbox_rembg(
     image: Image.Image,
+    model_name: str = "u2netp",
     alpha_threshold: int = 22,
 ) -> Optional[tuple[int, int, int, int]]:
     from rembg import remove
 
-    session = _get_session()
+    session = _get_session(model_name)
     out = remove(image, session=session)
     out = out.convert("RGBA")
     a = np.array(out.getchannel("A"))
@@ -112,9 +112,13 @@ def process_image_bytes(
         )
 
     # --- Stage 2: rembg (if CV weak / missing) ---
-    if chosen is None and cfg.use_rembg:
+    if chosen is None and cfg.use_rembg and (w * h) <= cfg.rembg_max_pixels:
         try:
-            rb = get_subject_bbox_rembg(rgb, alpha_threshold=cfg.rembg_alpha_threshold)
+            rb = get_subject_bbox_rembg(
+                rgb,
+                model_name=cfg.rembg_model,
+                alpha_threshold=cfg.rembg_alpha_threshold,
+            )
         except Exception:
             logger.exception("rembg stage failed")
             rb = None
@@ -122,6 +126,13 @@ def process_image_bytes(
             chosen = apply_padding(rb, w, h, cfg.padding_px)
             method_parts.append("rembg")
             logger.info("Crop rembg: bbox=%s", chosen)
+    elif chosen is None and cfg.use_rembg:
+        logger.info(
+            "Skip rembg: image too large (%sx%s > %s px)",
+            w,
+            h,
+            cfg.rembg_max_pixels,
+        )
 
     # --- Stage 3: CV with moderate confidence if rembg did not help ---
     if (

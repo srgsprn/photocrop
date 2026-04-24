@@ -78,6 +78,10 @@ class CropConfig:
 
     # Enable rembg stage (requires model download)
     use_rembg: bool = _bool("CROP_USE_REMBG", True)
+    # Faster model by default; set CROP_REMBG_MODEL=u2net for maximum quality
+    rembg_model: str = os.environ.get("CROP_REMBG_MODEL", "u2netp")
+    # Skip rembg on very large frames to avoid CPU/RAM spikes and hangs
+    rembg_max_pixels: int = _int("CROP_REMBG_MAX_PIXELS", 3_000_000)
 
     # --- Mobile marketplace screenshots (white footer + carousel) ---
     listing_gray_white_min: int = _int("CROP_LISTING_WHITE_MIN", 248)
@@ -108,6 +112,10 @@ class CropConfig:
 class BotConfig:
     max_crops_per_minute: int = _int("BOT_RATE_LIMIT_PER_MINUTE", 25)
     max_image_bytes: int = _int("BOT_MAX_IMAGE_BYTES", 20 * 1024 * 1024)
+    # Hard timeout per image processing; prevents endless waits
+    process_timeout_sec: int = _int("BOT_PROCESS_TIMEOUT_SEC", 35)
+    # Global parallel workers for CPU-heavy crop pipeline
+    max_parallel_jobs: int = _int("BOT_MAX_PARALLEL_JOBS", 2)
 
 
 DEFAULT_CROP_CONFIG = CropConfig()

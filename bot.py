@@ -48,6 +48,7 @@ def _token_looks_valid(token: str) -> bool:
 # user_id -> deque of unix timestamps (last 60s)
 _rate: Dict[int, Deque[float]] = {}
 _bot_cfg = DEFAULT_BOT_CONFIG
+_worker_sem = asyncio.Semaphore(max(1, _bot_cfg.max_parallel_jobs))
 
 ALLOWED_DOC_MIME = {
     "image/jpeg",
@@ -80,6 +81,19 @@ async def _download_largest_photo(message: Message) -> bytes:
     buf = BytesIO()
     await message.bot.download_file(file.file_path, buf)
     return buf.getvalue()
+
+
+async def _process_bytes_with_limits(data: bytes) -> ProcessOutcome:
+    """
+    CPU-heavy crop executed in a bounded worker slot with timeout.
+    Prevents bot-wide stalls under burst load.
+    """
+    timeout = max(5, int(_bot_cfg.process_timeout_sec))
+    async with _worker_sem:
+        return await asyncio.wait_for(
+            asyncio.to_thread(process_image_bytes, data),
+            timeout=timeout,
+        )
 
 
 async def _process_album_and_reply(messages: List[Message]) -> None:
@@ -124,10 +138,18 @@ async def _process_album_and_reply(messages: List[Message]) -> None:
                 await first.answer("❌ Одно из фото слишком большое.")
                 return
             try:
-                out = await asyncio.to_thread(process_image_bytes, data)
+                out = await _process_bytes_with_limits(data)
             except ValueError as e:
                 await status.delete()
                 await first.answer(f"❌ {e}")
+                return
+            except asyncio.TimeoutError:
+                logger.warning("Album: timeout while processing image")
+                await status.delete()
+                await first.answer(
+                    "⏱️ Одно из фото обрабатывалось слишком долго. "
+                    "Попробуй фото меньшего размера."
+                )
                 return
             except Exception:
                 logger.exception("Album: crop failed")
@@ -181,7 +203,12 @@ def _schedule_album_flush(key: Tuple[int, str]) -> None:
         msgs = _album_buffers.pop(key, [])
         _album_flush_tasks.pop(key, None)
         if msgs:
-            await _process_album_and_reply(msgs)
+            try:
+                await _process_album_and_reply(msgs)
+            except Exception:
+                logger.exception("Album flush task crashed key=%s", key)
+                first = msgs[0]
+                await first.answer("❌ Ошибка обработки альбома. Попробуй отправить ещё раз.")
 
     if key in _album_flush_tasks:
         _album_flush_tasks[key].cancel()
@@ -208,11 +235,19 @@ async def _process_and_reply(message: Message, data: bytes, source: str) -> None
 
     status = await message.answer("⏳ Обрезаю…")
     try:
-        outcome = await asyncio.to_thread(process_image_bytes, data)
+        outcome = await _process_bytes_with_limits(data)
     except ValueError as e:
         logger.info("Reject image user=%s: %s", uid, e)
         await status.delete()
         await message.answer(f"❌ {e}")
+        return
+    except asyncio.TimeoutError:
+        logger.warning("Timeout user=%s source=%s", uid, source)
+        await status.delete()
+        await message.answer(
+            "⏱️ Обработка заняла слишком много времени. "
+            "Попробуй отправить фото поменьше."
+        )
         return
     except Exception:
         logger.exception("Unexpected error user=%s source=%s", uid, source)
@@ -343,7 +378,13 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     me = await bot.get_me()
-    logger.info("Starting bot @%s (id=%s) — long polling", me.username, me.id)
+    logger.info(
+        "Starting bot @%s (id=%s) — long polling, workers=%s timeout=%ss",
+        me.username,
+        me.id,
+        _bot_cfg.max_parallel_jobs,
+        _bot_cfg.process_timeout_sec,
+    )
     # Иначе при включённом webhook getUpdates пустой — бот «молчит»
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
