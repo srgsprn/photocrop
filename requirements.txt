@@ -5,3 +5,4 @@ onnxruntime>=1.16.0
 Pillow>=10.0.0
 numpy>=1.24.0
 opencv-python-headless>=4.9.0.80
+aiohttp-socks>=0.10.1

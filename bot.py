@@ -428,10 +428,22 @@ async def main() -> None:
             "(digits:secret, no spaces). If you leaked the token, use /revoke and create a new one."
         )
         return
+    try:
+        session = build_aiogram_session()
+    except RuntimeError:
+        logger.exception(
+            "Failed to init HTTP session. If BOT_PROXY_URL is set, "
+            "install aiohttp-socks and verify proxy URL."
+        )
+        return
+
+    if PROXY_URL:
+        logger.info("Using BOT_PROXY_URL for Telegram API transport")
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=build_aiogram_session(),
+        session=session,
     )
     await _wait_for_telegram_api(bot)
 
