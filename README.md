@@ -1,77 +1,59 @@
-# Product crop Telegram bot (@mouse_photo_crop_bot)
+# PhotoCrop
 
-Бот в Telegram **автоматически обрезает скриншоты** страниц: убирает пустые поля и по возможности выделяет основную карточку/фото. Можно слать **фото** или **файл** (PNG, JPEG, WebP).
+**Telegram-бот для автоматической обрезки скриншотов** — убирает пустые поля и выделяет основной объект на фото.
 
-## Как устроено
+[![Telegram](https://img.shields.io/badge/Telegram-@mouse__photo__crop__bot-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/mouse_photo_crop_bot)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org)
+[![OpenCV](https://img.shields.io/badge/OpenCV-computer_vision-5C3EE8?style=for-the-badge)](https://opencv.org)
 
-1. **OpenCV** — несколько эвристик на одном кадре:
-   - обрезка по «энергии» градиента (Sobel) по строкам/столбцам — убирает большие однотонные поля;
-   - **Canny** + морфология + **контуры** — ищет крупные области с краями;
-   - **adaptive threshold** + **connected components** — запасной путь для контрастных макетов.
-   Кандидаты объединяются, если пересекаются; итоговый прямоугольник проверяется на «не слишком агрессивный» кроп (минимальная доля площади и сторон).
+> Бот: [@mouse_photo_crop_bot](https://t.me/mouse_photo_crop_bot) · [github.com/srgsprn/photocrop](https://github.com/srgsprn/photocrop)
 
-2. **rembg (u2net)** — если уверенность CV ниже порога или CV не дал устойчивого результата, подключается сегментация по альфе (как раньше в проекте).
+---
 
-3. **Fallback** — если ничего нельзя применить уверенно, бот по умолчанию **отправляет исходное изображение** (не падает и не отдаёт пустой ответ). Это можно отключить переменной окружения.
+## О проекте
 
-Параметры (padding, пороги площади, Canny, лимиты агрессии кропа) задаются в **`config.py`** / через префикс **`CROP_*`** в окружении (см. комментарии в `config.py`).
+Бот принимает фото или файл (PNG, JPEG, WebP) и возвращает аккуратно обрезанное изображение. Сделан **для своей девушки**, чтобы упростить её рабочие процессы с визуальным контентом.
 
-## Установка
+Автор: **Sergei Suprun**
+
+| | |
+|---|---|
+| **Задача** | Быстрая обрезка скриншотов без ручной работы в редакторе |
+| **Стек** | Python, aiogram 3, OpenCV, rembg (u2net) |
+| **Деплой** | VPS (systemd), Fly.io / Railway |
+
+---
+
+## Как работает
+
+1. **OpenCV** — эвристики по градиентам, контурам и контрасту
+2. **rembg** — сегментация, если CV не уверен в результате
+3. **Fallback** — исходник, если кроп ненадёжен
+
+---
+
+## Быстрый старт
 
 ```bash
-cd photocrop   # путь к клону репозитория
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+git clone https://github.com/srgsprn/photocrop.git
+cd photocrop
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-Первый запуск с **rembg** скачает модель `u2net` (~176 МБ). Чтобы обрабатывать только OpenCV без модели:
-
-```bash
-export CROP_USE_REMBG=0
-```
-
-## Запуск бота
-
-```bash
-export BOT_TOKEN="your_bot_token_here"
+export BOT_TOKEN="your_token"
 python bot.py
 ```
 
-Опционально: файл `.env` с `BOT_TOKEN=...` (подхватывается через `python-dotenv`).
+Пакетная обработка: `python batch_crop.py ./input ./output`
 
-### Лимиты
+Деплой на VPS: [deploy/timeweb-vps.md](./deploy/timeweb-vps.md)
 
-- **`BOT_RATE_LIMIT_PER_MINUTE`** — максимум обработок с одного пользователя за ~минуту (по умолчанию 25).
-- **`BOT_MAX_IMAGE_BYTES`** — максимальный размер файла (по умолчанию 20 МБ).
+---
 
-## Локальный прогон на папке с картинками
+## Навыки
 
-```bash
-python batch_crop.py ./my_screenshots ./out_cropped
-```
+Computer vision · Telegram Bot API · async Python · production deploy
 
-Только OpenCV (быстрее, без rembg):
+---
 
-```bash
-python batch_crop.py ./my_screenshots ./out_cropped --no-rembg
-```
-
-## Команды в Telegram
-
-- `/start`, `/help` — краткая справка.
-- Остальное — просто отправьте **фото** или **документ**-картинку.
-
-## Деплой 24/7
-
-- **Свой VPS (Timeweb и др.):** пошагово **[deploy/timeweb-vps.md](deploy/timeweb-vps.md)** — отдельный пользователь `photocrop`, каталог `/opt/mouse-photo-crop-bot`, `systemd`, без пересечения с другими проектами.
-- **Railway / Render / Fly.io:** см. **[DEPLOY.md](DEPLOY.md)**. Не забудьте `BOT_TOKEN` только в секретах/`.env`, не в git.
-
-## Советы по качеству
-
-- Чем крупнее объект в кадре, тем стабильнее результат.
-- Сильно «шумные» или тёмные скрины иногда дают только fallback (исходник).
-
-## Опционально: более лёгкая модель rembg
-
-В `crop_engine.py` в `new_session("u2net")` можно заменить на `"u2netp"` — быстрее и легче, точность ниже.
+**Sergei Suprun** · [@srgsprn](https://github.com/srgsprn) · [sergeysuprun@list.ru](mailto:sergeysuprun@list.ru)
